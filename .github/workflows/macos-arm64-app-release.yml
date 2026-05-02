@@ -1,0 +1,169 @@
+name: macOS arm64 app release
+
+on:
+  push:
+    branches:
+      - macos-arm64-packaging
+  workflow_dispatch:
+    inputs:
+      sync_upstream:
+        description: Sync this branch from upstream/master before building
+        required: true
+        default: true
+        type: boolean
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: macos-arm64-app-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: macos-arm64-v3.4.1
+  RELEASE_NAME: Aegisub 3.4.1 macOS arm64
+  APP_ZIP: Aegisub.app.zip
+
+jobs:
+  sync-upstream:
+    name: Sync from upstream
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || inputs.sync_upstream
+    outputs:
+      synced_sha: ${{ steps.sync.outputs.synced_sha }}
+    steps:
+      - name: Checkout packaging branch
+        uses: actions/checkout@v6
+        with:
+          ref: macos-arm64-packaging
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Merge upstream/master
+        id: sync
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream https://github.com/TypesettingTools/Aegisub.git
+          git fetch upstream master
+
+          if git merge --ff-only upstream/master; then
+            echo "Fast-forwarded to upstream/master."
+          else
+            git merge --no-edit upstream/master
+          fi
+
+          git push origin HEAD:macos-arm64-packaging
+          echo "synced_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-app:
+    name: Build Aegisub.app.zip
+    runs-on: macos-15
+    needs: sync-upstream
+    if: always() && (needs.sync-upstream.result == 'success' || needs.sync-upstream.result == 'skipped')
+    steps:
+      - name: Checkout packaging branch
+        uses: actions/checkout@v6
+        with:
+          ref: macos-arm64-packaging
+          fetch-depth: 0
+
+      - name: Verify runner architecture
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          export HOMEBREW_NO_INSTALL_CLEANUP=1
+          export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
+
+          brew install \
+            cmake \
+            gettext \
+            libass \
+            meson \
+            ninja \
+            pkg-config \
+            zlib \
+            ffms2 \
+            fftw \
+            hunspell \
+            uchardet \
+            wxwidgets
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+
+          ICU_PREFIX="$(brew --prefix icu4c@78 2>/dev/null || brew --prefix icu4c)"
+
+          export LDFLAGS="-L${ICU_PREFIX}/lib"
+          export CPPFLAGS="-I${ICU_PREFIX}/include"
+          export PKG_CONFIG_PATH="${ICU_PREFIX}/lib/pkgconfig:/opt/homebrew/lib/pkgconfig"
+
+          meson setup build_static \
+            -Ddefault_library=static \
+            -Dbuildtype=debugoptimized \
+            -Dbuild_osx_bundle=true \
+            -Dlocal_boost=true
+
+      - name: Build and test
+        run: |
+          set -euo pipefail
+
+          ICU_PREFIX="$(brew --prefix icu4c@78 2>/dev/null || brew --prefix icu4c)"
+
+          export LDFLAGS="-L${ICU_PREFIX}/lib"
+          export CPPFLAGS="-I${ICU_PREFIX}/include"
+          export PKG_CONFIG_PATH="${ICU_PREFIX}/lib/pkgconfig:/opt/homebrew/lib/pkgconfig"
+
+          meson compile -C build_static
+          meson test -C build_static --verbose
+
+      - name: Bundle app
+        run: |
+          set -euo pipefail
+
+          ICU_PREFIX="$(brew --prefix icu4c@78 2>/dev/null || brew --prefix icu4c)"
+
+          export LDFLAGS="-L${ICU_PREFIX}/lib"
+          export CPPFLAGS="-I${ICU_PREFIX}/include"
+          export PKG_CONFIG_PATH="${ICU_PREFIX}/lib/pkgconfig:/opt/homebrew/lib/pkgconfig"
+
+          meson compile osx-bundle -C build_static
+
+      - name: Package app zip
+        run: |
+          set -euo pipefail
+          file build_static/Aegisub.app/Contents/MacOS/aegisub
+          codesign --verify --deep --strict --verbose=2 build_static/Aegisub.app
+          ditto -c -k --keepParent build_static/Aegisub.app "${APP_ZIP}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ env.APP_ZIP }}
+          path: ${{ env.APP_ZIP }}
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release edit "${RELEASE_TAG}" --title "${RELEASE_NAME}"
+            gh release upload "${RELEASE_TAG}" "${APP_ZIP}" --clobber
+          else
+            gh release create "${RELEASE_TAG}" "${APP_ZIP}" \
+              --title "${RELEASE_NAME}" \
+              --notes "Apple Silicon arm64 Aegisub.app build from the macos-arm64-packaging branch."
+          fi
