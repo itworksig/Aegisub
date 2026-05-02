@@ -1,5 +1,28 @@
 # Aegisub
 
+## macOS Apple Silicon build
+
+This fork keeps a packaging branch for Apple Silicon builds:
+
+- Branch: `macos-arm64-packaging`
+- Release name: `Aegisub 3.4.1 macOS arm64`
+- Release tag: `macos-arm64-v3.4.1`
+- Release artifact: `Aegisub.app.zip`
+
+The workflow at `.github/workflows/macos-arm64-app-release.yml` builds a native
+macOS arm64 `Aegisub.app`, verifies the app bundle, zips it with `ditto`, uploads
+it as a workflow artifact, and publishes or updates the GitHub Release above.
+
+The workflow can also sync this branch from the upstream repository
+(`TypesettingTools/Aegisub`) before building. Manual runs can enable or disable
+that sync with the `sync_upstream` input.
+
+Important GitHub Actions note: scheduled workflows only run from the repository's
+default branch. For fully automatic daily upstream syncing, keep this workflow
+available on the default branch as well as on `macos-arm64-packaging`, or make
+`macos-arm64-packaging` the default branch. Pushes to `macos-arm64-packaging`
+still trigger the app build immediately.
+
 For binaries and general information [see the homepage](http://aegisub.org).
 
 The bug tracker can be found at https://github.com/TypesettingTools/Aegisub/issues.
