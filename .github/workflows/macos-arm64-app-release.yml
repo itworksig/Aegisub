@@ -139,16 +139,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_date="$(date -u +%Y%m%d)"
+          project_version="$(meson introspect build_static --projectinfo | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')"
           short_sha="$(git rev-parse --short HEAD)"
-          release_tag="macos-arm64-${release_date}-${GITHUB_RUN_NUMBER}"
-          release_name="Aegisub macOS arm64 ${release_date}.${GITHUB_RUN_NUMBER}"
-          app_zip="Aegisub-macOS-arm64-${release_date}.${GITHUB_RUN_NUMBER}.zip"
+          release_tag="macos-arm64-v${project_version}-${GITHUB_RUN_NUMBER}"
+          release_name="Aegisub ${project_version} macOS arm64"
+          app_zip="Aegisub-${project_version}-macOS-arm64.zip"
 
           {
             echo "tag=${release_tag}"
             echo "name=${release_name}"
             echo "app_zip=${app_zip}"
+            echo "project_version=${project_version}"
             echo "target=$(git rev-parse HEAD)"
             echo "short_sha=${short_sha}"
           } >> "$GITHUB_OUTPUT"
@@ -178,5 +179,6 @@ jobs:
             --title "${{ steps.release.outputs.name }}" \
             --notes "Apple Silicon arm64 Aegisub.app build from the macos-arm64-packaging branch.
 
+          Version: ${{ steps.release.outputs.project_version }}
           Commit: ${{ steps.release.outputs.short_sha }}
           Workflow run: ${GITHUB_RUN_NUMBER}"
