@@ -21,9 +21,6 @@ concurrency:
   group: macos-arm64-app-release
   cancel-in-progress: false
 
-env:
-  APP_ZIP: Aegisub.app.zip
-
 jobs:
   sync-upstream:
     name: Sync from upstream
@@ -60,7 +57,7 @@ jobs:
           echo "synced_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   build-app:
-    name: Build Aegisub.app.zip
+    name: Build Aegisub app zip
     runs-on: macos-15
     needs: sync-upstream
     if: always() && (needs.sync-upstream.result == 'success' || needs.sync-upstream.result == 'skipped')
@@ -137,20 +134,6 @@ jobs:
 
           meson compile osx-bundle -C build_static
 
-      - name: Package app zip
-        run: |
-          set -euo pipefail
-          file build_static/Aegisub.app/Contents/MacOS/aegisub
-          codesign --verify --deep --strict --verbose=2 build_static/Aegisub.app
-          ditto -c -k --keepParent build_static/Aegisub.app "${APP_ZIP}"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ env.APP_ZIP }}
-          path: ${{ env.APP_ZIP }}
-          if-no-files-found: error
-
       - name: Prepare release metadata
         id: release
         run: |
@@ -160,13 +143,29 @@ jobs:
           short_sha="$(git rev-parse --short HEAD)"
           release_tag="macos-arm64-${release_date}-${GITHUB_RUN_NUMBER}"
           release_name="Aegisub macOS arm64 ${release_date}.${GITHUB_RUN_NUMBER}"
+          app_zip="Aegisub-macOS-arm64-${release_date}.${GITHUB_RUN_NUMBER}.zip"
 
           {
             echo "tag=${release_tag}"
             echo "name=${release_name}"
+            echo "app_zip=${app_zip}"
             echo "target=$(git rev-parse HEAD)"
             echo "short_sha=${short_sha}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Package app zip
+        run: |
+          set -euo pipefail
+          file build_static/Aegisub.app/Contents/MacOS/aegisub
+          codesign --verify --deep --strict --verbose=2 build_static/Aegisub.app
+          ditto -c -k --keepParent build_static/Aegisub.app "${{ steps.release.outputs.app_zip }}"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.release.outputs.app_zip }}
+          path: ${{ steps.release.outputs.app_zip }}
+          if-no-files-found: error
 
       - name: Publish GitHub release
         env:
@@ -174,7 +173,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh release create "${{ steps.release.outputs.tag }}" "${APP_ZIP}" \
+          gh release create "${{ steps.release.outputs.tag }}" "${{ steps.release.outputs.app_zip }}" \
             --target "${{ steps.release.outputs.target }}" \
             --title "${{ steps.release.outputs.name }}" \
             --notes "Apple Silicon arm64 Aegisub.app build from the macos-arm64-packaging branch.
